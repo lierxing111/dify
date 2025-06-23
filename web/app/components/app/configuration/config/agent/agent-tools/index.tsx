@@ -32,9 +32,9 @@ import cn from '@/utils/classnames'
 import ToolPicker from '@/app/components/workflow/block-selector/tool-picker'
 import type { ToolDefaultValue, ToolValue } from '@/app/components/workflow/block-selector/types'
 import { canFindTool } from '@/utils'
-import { useMittContextSelector } from '@/context/mitt-context'
 import { useAllBuiltInTools, useAllCustomTools, useAllMCPTools, useAllWorkflowTools } from '@/service/use-tools'
 import type { ToolWithProvider } from '@/app/components/workflow/types'
+import { useMittContextSelector } from '@/context/mitt-context'
 
 type AgentToolWithMoreInfo = AgentTool & { icon: any; collection?: Collection } | null
 const AgentTools: FC = () => {

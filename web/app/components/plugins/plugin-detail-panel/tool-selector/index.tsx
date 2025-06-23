@@ -56,6 +56,7 @@ type Props = {
   selectedTools?: ToolValue[]
   onSelect: (tool: ToolValue) => void
   onSelectMultiple: (tool: ToolValue[]) => void
+  isEdit?: boolean
   onDelete?: () => void
   supportEnableSwitch?: boolean
   supportAddCustomTool?: boolean
