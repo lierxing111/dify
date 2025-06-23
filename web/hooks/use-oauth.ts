@@ -1,28 +1,18 @@
 'use client'
 import { useEffect } from 'react'
-import { useSearchParams } from 'next/navigation'
 
 export const useOAuthCallback = () => {
-  const searchParams = useSearchParams()
-
   useEffect(() => {
-    const code = searchParams.get('code')
-    const state = searchParams.get('state')
-
-    if (code && state && window.opener) {
+    if (window.opener) {
       window.opener.postMessage({
         type: 'oauth_callback',
-        payload: {
-          code,
-          state,
-        },
       }, '*')
       window.close()
     }
-  }, [searchParams])
+  }, [])
 }
 
-export const openOAuthPopup = (url: string, callback: (state: string, code: string) => void) => {
+export const openOAuthPopup = (url: string, callback: () => void) => {
   const width = 600
   const height = 600
   const left = window.screenX + (window.outerWidth - width) / 2
@@ -37,8 +27,7 @@ export const openOAuthPopup = (url: string, callback: (state: string, code: stri
   const handleMessage = (event: MessageEvent) => {
     if (event.data?.type === 'oauth_callback') {
       window.removeEventListener('message', handleMessage)
-      const { code, state } = event.data.payload
-      callback(state, code)
+      callback()
     }
   }
 

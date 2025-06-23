@@ -25,7 +25,6 @@ import {
   useInvalidateMCPTools,
   useMCPTools,
   useUpdateMCP,
-  useUpdateMCPAuthorizationToken,
   useUpdateMCPTools,
 } from '@/service/use-tools'
 import { openOAuthPopup } from '@/hooks/use-oauth'
@@ -53,16 +52,21 @@ const MCPDetailContent: FC<Props> = ({
   const invalidateMCPTools = useInvalidateMCPTools()
   const { mutateAsync: updateTools, isPending: isUpdating } = useUpdateMCPTools()
   const { mutateAsync: authorizeMcp, isPending: isAuthorizing } = useAuthorizeMCP()
-  const { mutateAsync: updateMCPAuthorizationToken } = useUpdateMCPAuthorizationToken()
   const toolList = data?.tools || []
 
+  const [isShowUpdateConfirm, {
+    setTrue: showUpdateConfirm,
+    setFalse: hideUpdateConfirm,
+  }] = useBoolean(false)
+
   const handleUpdateTools = useCallback(async () => {
+    hideUpdateConfirm()
     if (!detail)
       return
     await updateTools(detail.id)
     invalidateMCPTools(detail.id)
     onUpdate()
-  }, [detail, updateTools])
+  }, [detail, hideUpdateConfirm, invalidateMCPTools, onUpdate, updateTools])
 
   const { mutate: updateMCP } = useUpdateMCP({
     onSuccess: onUpdate,
@@ -86,17 +90,13 @@ const MCPDetailContent: FC<Props> = ({
     setFalse: hideDeleting,
   }] = useBoolean(false)
 
-  const handleOAuthCallback = async (state: string, code: string) => {
+  const handleOAuthCallback = useCallback(() => {
     if (!isCurrentWorkspaceManager)
       return
-    if (detail.id !== state)
+    if (!detail.id)
       return
-    await updateMCPAuthorizationToken({
-      provider_id: state,
-      authorization_code: code,
-    })
     handleUpdateTools()
-  }
+  }, [detail.id, handleUpdateTools, isCurrentWorkspaceManager])
 
   const handleAuthorize = useCallback(async () => {
     onFirstCreate()
@@ -112,7 +112,7 @@ const MCPDetailContent: FC<Props> = ({
 
     else if (res.authorization_url)
       openOAuthPopup(res.authorization_url, handleOAuthCallback)
-  }, [detail, updateMCP, hideUpdateModal, onUpdate])
+  }, [onFirstCreate, isCurrentWorkspaceManager, detail, authorizeMcp, handleUpdateTools, handleOAuthCallback])
 
   const handleUpdate = useCallback(async (data: any) => {
     if (!detail)
@@ -137,11 +137,12 @@ const MCPDetailContent: FC<Props> = ({
       hideDeleteConfirm()
       onUpdate(true)
     }
-  }, [detail, showDeleting, hideDeleting, hideDeleteConfirm, onUpdate])
+  }, [detail, showDeleting, deleteMCP, hideDeleting, hideDeleteConfirm, onUpdate])
 
   useEffect(() => {
     if (isCreation)
       handleAuthorize()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   if (!detail)
@@ -175,6 +176,7 @@ const MCPDetailContent: FC<Props> = ({
             <Button
               variant='secondary'
               className='w-full'
+              onClick={handleAuthorize}
               disabled={!isCurrentWorkspaceManager}
             >
               <Indicator className='mr-2' color={'green'} />
@@ -235,7 +237,7 @@ const MCPDetailContent: FC<Props> = ({
                 {toolList.length === 1 && <div className='system-sm-semibold-uppercase text-text-secondary'>{t('tools.mcp.onlyTool')}</div>}
               </div>
               <div>
-                <Button size='small' onClick={handleUpdateTools}>
+                <Button size='small' onClick={showUpdateConfirm}>
                   <RiLoopLeftLine className='mr-1 h-3.5 w-3.5' />
                   {t('tools.mcp.update')}
                 </Button>
@@ -281,6 +283,14 @@ const MCPDetailContent: FC<Props> = ({
           onConfirm={handleDelete}
           isLoading={deleting}
           isDisabled={deleting}
+        />
+      )}
+      {isShowUpdateConfirm && (
+        <Confirm
+          isShow
+          title={t('tools.mcp.update')}
+          onCancel={hideUpdateConfirm}
+          onConfirm={handleUpdateTools}
         />
       )}
     </>
