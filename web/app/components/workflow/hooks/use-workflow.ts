@@ -502,6 +502,8 @@ export const useToolIcon = (data: Node['data']) => {
   const mcpTools = useStore(s => s.mcpTools)
 
   const toolIcon = useMemo(() => {
+    if(!data)
+      return ''
     if (data.type === BlockEnum.Tool) {
       let targetTools = buildInTools
       if (data.provider_type === CollectionType.builtIn)
