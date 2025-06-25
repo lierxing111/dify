@@ -1,8 +1,8 @@
 import logging
-from typing import NoReturn
+from typing import Any, NoReturn
 
 from flask import Response
-from flask_restful import Resource, fields, inputs, marshal_with, reqparse
+from flask_restful import Resource, fields, inputs, marshal, marshal_with, reqparse
 from sqlalchemy.orm import Session
 from werkzeug.exceptions import Forbidden
 
@@ -13,8 +13,12 @@ from controllers.console.app.error import (
 from controllers.console.app.wraps import get_app_model
 from controllers.console.wraps import account_initialization_required, setup_required
 from controllers.web.error import InvalidArgumentError, NotFoundError
+from core.variables.segment_group import SegmentGroup
+from core.variables.segments import ArrayFileSegment, FileSegment, Segment
+from core.variables.types import SegmentType
 from core.workflow.constants import CONVERSATION_VARIABLE_NODE_ID, SYSTEM_VARIABLE_NODE_ID
-from factories.variable_factory import build_segment
+from factories.file_factory import build_from_mapping, build_from_mappings
+from factories.variable_factory import build_segment_with_type
 from libs.login import current_user, login_required
 from models import App, AppMode, db
 from models.workflow import WorkflowDraftVariable
@@ -22,6 +26,32 @@ from services.workflow_draft_variable_service import WorkflowDraftVariableList, 
 from services.workflow_service import WorkflowService
 
 logger = logging.getLogger(__name__)
+
+
+def _convert_values_to_json_serializable_object(value: Segment) -> Any:
+    if isinstance(value, FileSegment):
+        return value.value.model_dump()
+    elif isinstance(value, ArrayFileSegment):
+        return [i.model_dump() for i in value.value]
+    elif isinstance(value, SegmentGroup):
+        return [_convert_values_to_json_serializable_object(i) for i in value.value]
+    else:
+        return value.value
+
+
+def _serialize_var_value(variable: WorkflowDraftVariable) -> Any:
+    value = variable.get_value()
+    # create a copy of the value to avoid affecting the model cache.
+    value = value.model_copy(deep=True)
+    # Refresh the url signature before returning it to client.
+    if isinstance(value, FileSegment):
+        file = value.value
+        file.remote_url = file.generate_url()
+    elif isinstance(value, ArrayFileSegment):
+        files = value.value
+        for file in files:
+            file.remote_url = file.generate_url()
+    return _convert_values_to_json_serializable_object(value)
 
 
 def _create_pagination_parser():
@@ -51,7 +81,7 @@ _WORKFLOW_DRAFT_VARIABLE_WITHOUT_VALUE_FIELDS = {
 
 _WORKFLOW_DRAFT_VARIABLE_FIELDS = dict(
     _WORKFLOW_DRAFT_VARIABLE_WITHOUT_VALUE_FIELDS,
-    value=fields.Raw(attribute=lambda variable: variable.get_value().value),
+    value=fields.Raw(attribute=_serialize_var_value),
 )
 
 _WORKFLOW_DRAFT_ENV_VARIABLE_FIELDS = {
@@ -139,7 +169,7 @@ class WorkflowVariableCollectionApi(Resource):
     @_api_prerequisite
     def delete(self, app_model: App):
         draft_var_srv = WorkflowDraftVariableService(
-            session=db.session,
+            session=db.session(),
         )
         draft_var_srv.delete_workflow_variables(app_model.id)
         db.session.commit()
@@ -180,7 +210,7 @@ class NodeVariableCollectionApi(Resource):
     @_api_prerequisite
     def delete(self, app_model: App, node_id: str):
         validate_node_id(node_id)
-        srv = WorkflowDraftVariableService(db.session)
+        srv = WorkflowDraftVariableService(db.session())
         srv.delete_node_variables(app_model.id, node_id)
         db.session.commit()
         return Response("", 204)
@@ -194,7 +224,7 @@ class VariableApi(Resource):
     @marshal_with(_WORKFLOW_DRAFT_VARIABLE_FIELDS)
     def get(self, app_model: App, variable_id: str):
         draft_var_srv = WorkflowDraftVariableService(
-            session=db.session,
+            session=db.session(),
         )
         variable = draft_var_srv.get_variable(variable_id=variable_id)
         if variable is None:
@@ -206,12 +236,34 @@ class VariableApi(Resource):
     @_api_prerequisite
     @marshal_with(_WORKFLOW_DRAFT_VARIABLE_FIELDS)
     def patch(self, app_model: App, variable_id: str):
+        # Request payload for file types:
+        #
+        # Local File:
+        #
+        #     {
+        #         "type": "image",
+        #         "transfer_method": "local_file",
+        #         "url": "",
+        #         "upload_file_id": "daded54f-72c7-4f8e-9d18-9b0abdd9f190"
+        #     }
+        #
+        # Remote File:
+        #
+        #
+        #     {
+        #         "type": "image",
+        #         "transfer_method": "remote_url",
+        #         "url": "http://127.0.0.1:5001/files/1602650a-4fe4-423c-85a2-af76c083e3c4/file-preview?timestamp=1750041099&nonce=...&sign=...=",
+        #         "upload_file_id": "1602650a-4fe4-423c-85a2-af76c083e3c4"
+        #     }
+
         parser = reqparse.RequestParser()
         parser.add_argument(self._PATCH_NAME_FIELD, type=str, required=False, nullable=True, location="json")
-        parser.add_argument(self._PATCH_VALUE_FIELD, type=build_segment, required=False, nullable=True, location="json")
+        # Parse 'value' field as-is to maintain its original data structure
+        parser.add_argument(self._PATCH_VALUE_FIELD, type=lambda x: x, required=False, nullable=True, location="json")
 
         draft_var_srv = WorkflowDraftVariableService(
-            session=db.session,
+            session=db.session(),
         )
         args = parser.parse_args(strict=True)
 
@@ -222,10 +274,23 @@ class VariableApi(Resource):
             raise NotFoundError(description=f"variable not found, id={variable_id}")
 
         new_name = args.get(self._PATCH_NAME_FIELD, None)
-        new_value = args.get(self._PATCH_VALUE_FIELD, None)
-
-        if new_name is None and new_value is None:
+        raw_value = args.get(self._PATCH_VALUE_FIELD, None)
+        if new_name is None and raw_value is None:
             return variable
+
+        new_value = None
+        if raw_value is not None:
+            if variable.value_type == SegmentType.FILE:
+                if not isinstance(raw_value, dict):
+                    raise InvalidArgumentError(description=f"expected dict for file, got {type(raw_value)}")
+                raw_value = build_from_mapping(mapping=raw_value, tenant_id=app_model.tenant_id)
+            elif variable.value_type == SegmentType.ARRAY_FILE:
+                if not isinstance(raw_value, list):
+                    raise InvalidArgumentError(description=f"expected list for files, got {type(raw_value)}")
+                if len(raw_value) > 0 and not isinstance(raw_value[0], dict):
+                    raise InvalidArgumentError(description=f"expected dict for files[0], got {type(raw_value)}")
+                raw_value = build_from_mappings(mappings=raw_value, tenant_id=app_model.tenant_id)
+            new_value = build_segment_with_type(variable.value_type, raw_value)
         draft_var_srv.update_variable(variable, name=new_name, value=new_value)
         db.session.commit()
         return variable
@@ -233,7 +298,7 @@ class VariableApi(Resource):
     @_api_prerequisite
     def delete(self, app_model: App, variable_id: str):
         draft_var_srv = WorkflowDraftVariableService(
-            session=db.session,
+            session=db.session(),
         )
         variable = draft_var_srv.get_variable(variable_id=variable_id)
         if variable is None:
@@ -243,6 +308,33 @@ class VariableApi(Resource):
         draft_var_srv.delete_variable(variable)
         db.session.commit()
         return Response("", 204)
+
+
+class VariableResetApi(Resource):
+    @_api_prerequisite
+    def put(self, app_model: App, variable_id: str):
+        draft_var_srv = WorkflowDraftVariableService(
+            session=db.session(),
+        )
+
+        workflow_srv = WorkflowService()
+        draft_workflow = workflow_srv.get_draft_workflow(app_model)
+        if draft_workflow is None:
+            raise NotFoundError(
+                f"Draft workflow not found, app_id={app_model.id}",
+            )
+        variable = draft_var_srv.get_variable(variable_id=variable_id)
+        if variable is None:
+            raise NotFoundError(description=f"variable not found, id={variable_id}")
+        if variable.app_id != app_model.id:
+            raise NotFoundError(description=f"variable not found, id={variable_id}")
+
+        resetted = draft_var_srv.reset_variable(draft_workflow, variable)
+        db.session.commit()
+        if resetted is None:
+            return Response("", 204)
+        else:
+            return marshal(resetted, _WORKFLOW_DRAFT_VARIABLE_FIELDS)
 
 
 def _get_variable_list(app_model: App, node_id) -> WorkflowDraftVariableList:
@@ -263,6 +355,15 @@ class ConversationVariableCollectionApi(Resource):
     @_api_prerequisite
     @marshal_with(_WORKFLOW_DRAFT_VARIABLE_LIST_FIELDS)
     def get(self, app_model: App):
+        # NOTE(QuantumGhost): Prefill conversation variables into the draft variables table
+        # so their IDs can be returned to the caller.
+        workflow_srv = WorkflowService()
+        draft_workflow = workflow_srv.get_draft_workflow(app_model)
+        if draft_workflow is None:
+            raise NotFoundError(description=f"draft workflow not found, id={app_model.id}")
+        draft_var_srv = WorkflowDraftVariableService(db.session())
+        draft_var_srv.prefill_conversation_variable_default_values(draft_workflow)
+        db.session.commit()
         return _get_variable_list(app_model, CONVERSATION_VARIABLE_NODE_ID)
 
 
@@ -313,6 +414,7 @@ api.add_resource(
 )
 api.add_resource(NodeVariableCollectionApi, "/apps/<uuid:app_id>/workflows/draft/nodes/<string:node_id>/variables")
 api.add_resource(VariableApi, "/apps/<uuid:app_id>/workflows/draft/variables/<uuid:variable_id>")
+api.add_resource(VariableResetApi, "/apps/<uuid:app_id>/workflows/draft/variables/<uuid:variable_id>/reset")
 
 api.add_resource(ConversationVariableCollectionApi, "/apps/<uuid:app_id>/workflows/draft/conversation-variables")
 api.add_resource(SystemVariableCollectionApi, "/apps/<uuid:app_id>/workflows/draft/system-variables")
