@@ -2,17 +2,6 @@ from flask_restful import fields
 
 from libs.helper import TimestampField
 
-dataset_fields = {
-    "id": fields.String,
-    "name": fields.String,
-    "description": fields.String,
-    "permission": fields.String,
-    "data_source_type": fields.String,
-    "indexing_technique": fields.String,
-    "created_by": fields.String,
-    "created_at": TimestampField,
-}
-
 reranking_model_fields = {"reranking_provider_name": fields.String, "reranking_model_name": fields.String}
 
 keyword_setting_fields = {"keyword_weight": fields.Float}
@@ -55,6 +44,18 @@ external_knowledge_info_fields = {
 }
 
 doc_metadata_fields = {"id": fields.String, "name": fields.String, "type": fields.String}
+
+dataset_fields = {
+    "id": fields.String,
+    "name": fields.String,
+    "description": fields.String,
+    "permission": fields.String,
+    "data_source_type": fields.String,
+    "indexing_technique": fields.String,
+    "created_by": fields.String,
+    "created_at": TimestampField,
+    "retrieval_model_dict": fields.Nested(dataset_retrieval_model_fields),
+}
 
 dataset_detail_fields = {
     "id": fields.String,
