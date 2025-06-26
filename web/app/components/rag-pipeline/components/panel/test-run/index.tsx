@@ -15,6 +15,8 @@ import { DatasourceType } from '@/models/pipeline'
 import { TransferMethod } from '@/types/app'
 import CloseButton from './close-button'
 import Header from './header'
+import FooterTips from './footer-tips'
+import OnlineDrive from './data-source/online-drive'
 
 const TestRunPanel = () => {
   const setShowDebugAndPreviewPanel = useWorkflowStoreWithSelector(state => state.setShowDebugAndPreviewPanel)
@@ -50,17 +52,18 @@ const TestRunPanel = () => {
 
   const isVectorSpaceFull = plan.usage.vectorSpace >= plan.total.vectorSpace
   const isShowVectorSpaceFull = allFileLoaded && isVectorSpaceFull && enableBilling
+  const datasourceType = datasource?.nodeData.provider_type
 
   const nextBtnDisabled = useMemo(() => {
     if (!datasource) return true
-    if (datasource.type === DatasourceType.localFile)
+    if (datasourceType === DatasourceType.localFile)
       return isShowVectorSpaceFull || !fileList.length || fileList.some(file => !file.file.id)
-    if (datasource.type === DatasourceType.onlineDocument)
+    if (datasourceType === DatasourceType.onlineDocument)
       return isShowVectorSpaceFull || !onlineDocuments.length
-    if (datasource.type === DatasourceType.websiteCrawl)
+    if (datasourceType === DatasourceType.websiteCrawl)
       return isShowVectorSpaceFull || !websitePages.length
     return false
-  }, [datasource, isShowVectorSpaceFull, fileList, onlineDocuments.length, websitePages.length])
+  }, [datasource, datasourceType, isShowVectorSpaceFull, fileList, onlineDocuments.length, websitePages.length])
 
   const handleClose = () => {
     setShowDebugAndPreviewPanel(false)
@@ -70,7 +73,7 @@ const TestRunPanel = () => {
     if (!datasource)
       return
     const datasourceInfoList: Record<string, any>[] = []
-    if (datasource.type === DatasourceType.localFile) {
+    if (datasourceType === DatasourceType.localFile) {
       const { id, name, type, size, extension, mime_type } = fileList[0].file
       const documentInfo = {
         related_id: id,
@@ -84,7 +87,7 @@ const TestRunPanel = () => {
       }
       datasourceInfoList.push(documentInfo)
     }
-    if (datasource.type === DatasourceType.onlineDocument) {
+    if (datasourceType === DatasourceType.onlineDocument) {
       const { workspace_id, ...rest } = onlineDocuments[0]
       const documentInfo = {
         workspace_id,
@@ -92,15 +95,15 @@ const TestRunPanel = () => {
       }
       datasourceInfoList.push(documentInfo)
     }
-    if (datasource.type === DatasourceType.websiteCrawl)
+    if (datasourceType === DatasourceType.websiteCrawl)
       datasourceInfoList.push(websitePages[0])
     handleRun({
       inputs: data,
       start_node_id: datasource.nodeId,
-      datasource_type: datasource.type,
+      datasource_type: datasourceType,
       datasource_info_list: datasourceInfoList,
     })
-  }, [datasource, fileList, handleRun, onlineDocuments, websitePages])
+  }, [datasource, datasourceType, fileList, handleRun, onlineDocuments, websitePages])
 
   return (
     <div
@@ -108,7 +111,7 @@ const TestRunPanel = () => {
     >
       <CloseButton handleClose={handleClose} />
       <Header steps={steps} currentStep={currentStep} />
-      <div className='grow overflow-y-auto'>
+      <div className='flex grow flex-col overflow-y-auto'>
         {
           currentStep === 1 && (
             <>
@@ -117,37 +120,29 @@ const TestRunPanel = () => {
                   dataSourceNodeId={datasource?.nodeId || ''}
                   onSelect={setDatasource}
                 />
-                {datasource?.type === DatasourceType.localFile && (
+                {datasourceType === DatasourceType.localFile && (
                   <LocalFile
                     files={fileList}
-                    allowedExtensions={datasource?.fileExtensions || []}
+                    allowedExtensions={datasource!.nodeData.fileExtensions || []}
                     updateFile={updateFile}
                     updateFileList={updateFileList}
                     notSupportBatchUpload={false} // only support single file upload in test run
                   />
                 )}
-                {datasource?.type === DatasourceType.onlineDocument && (
+                {datasourceType === DatasourceType.onlineDocument && (
                   <OnlineDocuments
-                    nodeId={datasource?.nodeId || ''}
-                    headerInfo={{
-                      title: datasource.description,
-                      docTitle: datasource.docTitle || '',
-                      docLink: datasource.docLink || '',
-                    }}
+                    nodeId={datasource!.nodeId}
+                    nodeData={datasource!.nodeData}
                     onlineDocuments={onlineDocuments}
                     updateOnlineDocuments={updateOnlineDocuments}
                     isInPipeline
                   />
                 )}
-                {datasource?.type === DatasourceType.websiteCrawl && (
+                {datasourceType === DatasourceType.websiteCrawl && (
                   <WebsiteCrawl
-                    nodeId={datasource?.nodeId || ''}
+                    nodeId={datasource!.nodeId}
                     checkedCrawlResult={websitePages}
-                    headerInfo={{
-                      title: datasource.description,
-                      docTitle: datasource.docTitle || '',
-                      docLink: datasource.docLink || '',
-                    }}
+                    nodeData={datasource!.nodeData}
                     crawlResult={crawlResult}
                     setCrawlResult={setCrawlResult}
                     step={step}
@@ -156,18 +151,25 @@ const TestRunPanel = () => {
                     isInPipeline
                   />
                 )}
+                {datasourceType === DatasourceType.onlineDrive && (
+                  <OnlineDrive
+                    nodeData={datasource!.nodeData}
+                  />
+                )
+                }
                 {isShowVectorSpaceFull && (
                   <VectorSpaceFull />
                 )}
               </div>
               <Actions disabled={nextBtnDisabled} handleNextStep={handleNextStep} />
+              <FooterTips />
             </>
           )
         }
         {
           currentStep === 2 && (
             <DocumentProcessing
-              dataSourceNodeId={datasource?.nodeId || ''}
+              dataSourceNodeId={datasource!.nodeId}
               onProcess={handleProcess}
               onBack={handleBackStep}
             />
