@@ -26,6 +26,7 @@ type ToolsProps = {
   indexBarClassName?: string
   selectedTools?: ToolValue[]
   canChooseMCPTool?: boolean
+  hasScrollBar: boolean
 }
 const Blocks = ({
   showWorkflowEmpty,
@@ -39,6 +40,7 @@ const Blocks = ({
   indexBarClassName,
   selectedTools,
   canChooseMCPTool,
+  hasScrollBar,
 }: ToolsProps) => {
   const { t } = useTranslation()
   const language = useGetLanguage()
@@ -93,7 +95,7 @@ const Blocks = ({
   const toolRefs = useRef({})
 
   return (
-    <div className={classNames('p-1 max-w-[320px]', className)}>
+    <div className={classNames('p-1 max-w-[100%]', className)}>
       {
         !tools.length && !showWorkflowEmpty && (
           <div className='flex h-[22px] items-center px-3 text-xs font-medium text-text-tertiary'>{t('workflow.tabs.noResult')}</div>
@@ -131,7 +133,7 @@ const Blocks = ({
         )
       )}
 
-      {isShowLetterIndex && <IndexBar letters={letters} itemRefs={toolRefs} className={indexBarClassName} />}
+      {isShowLetterIndex && <IndexBar hasScrollBar={hasScrollBar} letters={letters} itemRefs={toolRefs} className={indexBarClassName} />}
     </div>
   )
 }
